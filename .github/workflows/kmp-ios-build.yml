@@ -24,6 +24,9 @@ name: Ferome Kotlin Multiplatform iOS Build
       build_id:
         required: true
         type: string
+      build_number:
+        required: true
+        type: string
       callback_url:
         required: true
         type: string
@@ -55,11 +58,33 @@ jobs:
           curl -L "${{ inputs.project_url }}" -o project.zip
           unzip -q project.zip -d project
 
+      - name: Set build number
+        working-directory: project/iosApp
+        run: |
+          PBXPROJS=$(find . -name "project.pbxproj" -not -path "*/Pods/*")
+          if [ -z "$PBXPROJS" ]; then
+            echo "Could not find a project.pbxproj under project/iosApp"
+            exit 1
+          fi
+          echo "$PBXPROJS" | while IFS= read -r pbxproj; do
+            sed -i '' -E "s/CURRENT_PROJECT_VERSION = [^;]+;/CURRENT_PROJECT_VERSION = ${{ inputs.build_number }};/g" "$pbxproj"
+          done
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('project/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
       - name: Make Gradle wrapper executable
         working-directory: project
@@ -127,6 +152,14 @@ jobs:
           echo "FEROME_CODE_SIGN_IDENTITY=${CODE_SIGN_IDENTITY}" >> "$GITHUB_ENV"
           echo "FEROME_PROFILE_UUID=${PROFILE_UUID}" >> "$GITHUB_ENV"
 
+      - name: Cache Swift Package Manager packages
+        uses: actions/cache@v4
+        with:
+          path: .spm-cache
+          key: ${{ runner.os }}-spm-${{ hashFiles('project/**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
       - name: Build archive
         working-directory: project/iosApp
         run: |
@@ -154,6 +187,7 @@ jobs:
             -scheme "$SCHEME" \
             -configuration Release \
             -archivePath ../../build/App.xcarchive \
+            -clonedSourcePackagesDirPath ../../.spm-cache \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="$FEROME_CODE_SIGN_IDENTITY" \
             DEVELOPMENT_TEAM="$FEROME_TEAM_ID" \
